@@ -1,0 +1,60 @@
+DEMO: https://www.youtube.com/watch?v=KmHYT65II1o
+
+Q:  WHAT IS THIS THING?
+
+A:  Recently, my laptop's monitor developed a rectangular "borked region",
+    36 pixels in width running the full vertical length of my monitor,
+    horizontally roughly in the centre. All of the pixels in this region
+    are stuck white.
+
+    I'm not a hardware guy.  I *am*, however, a C programmer, and one who
+    happened to have some spare time between semesters, so I decided to look for
+    a software solution.  This is my first-shot hack.
+
+    This patch, when applied to one of the source files in the Xorg server,
+    causes Xorg to shift all of the pixels from the beginning of the borked
+    region over to the right by the width of the borked region, so that nothing
+    on the monitor is obscured.
+
+Q:  HOW DOES IT WORK?
+
+A:  X can be configured to use one of the Linux framebuffer devices for drawing.
+    The driver for this, fbdev, supports a 'ShadowFB' option that instead sets
+    up a framebuffer in system memory, to be later copied into video memory.  My
+    understanding of the motivation for this was historically to improve
+    performance of workloads that were heavy on reads of video memory.  Anyway,
+    the shpacked.c shadowUpdateProc turns out to be a nice place to slip in and
+    fiddle with the logic responsible for copying video data from the system
+    memory framebuffer to the actual video framebuffer.
+
+Q:  WHAT'S ARE THE OBVIOUS, HUGE DISADVANTAGES?
+
+A:  You lose the rightmost pixels of the screen - as many as were shifted.  This
+    doesn't really bother me that much (definitely less than losing that many in
+    the middle of the monitor).
+
+    You also lose hardware acceleration, which I actually think hurts more.
+
+Q:  HOW DO I USE THIS?
+
+A:  If, somehow, you find yourself in the same position I was in...
+
+    1) Get a copy of the sources for the Xorg server, verion 1.15.1.  I run Ubuntu,
+       and did so with
+           apt-get source xorg-server
+
+    2) Apply the patch file in this repository to miext/shadow/shpacked.c
+           cat shpacked.diff | patch shpacked.c
+
+    3) Rebuild and reinstall the server.  For me, this meant
+            dpkg-buildpackage -us -uc
+            cd ..
+            sudo dpkg -i xserver-xorg-core_1.15.1-0ubuntu2.7_amd64.deb
+
+    4) Configure your X to use the fbdev driver, with the 'ShadowFB' option
+       enabled.  I've included my xorg.conf in this repository for reference -
+       search for 'fbdev' to find the relevant section.
+
+In terms of intellectual property:
+    - I've included the license that came with the Xorg source package I
+      modified when creating the patch.

@@ -1,0 +1,83 @@
+diff --git a/../orig/xorg-server-1.15.1/miext/shadow/shpacked.c b/miext/shadow/shpacked.c
+index 5ef18f8..d4955e8 100644
+--- a/../orig/xorg-server-1.15.1/miext/shadow/shpacked.c
++++ b/miext/shadow/shpacked.c
+@@ -40,6 +40,14 @@
+ #include    "shadow.h"
+ #include    "fb.h"
+ 
++#include    "os.h"
++#include    <sys/param.h>
++
++/* configure these according to the geometry of your monitor's borked region */
++#define     BORKED_START 672
++#define     BORKED_WIDTH 36
++#define     PHYSICAL_DISPLAY_WIDTH 1366
++
+ void
+ shadowUpdatePacked(ScreenPtr pScreen, shadowBufPtr pBuf)
+ {
+@@ -56,6 +64,7 @@ shadowUpdatePacked(ScreenPtr pScreen, shadowBufPtr pBuf)
+     int i;
+     FbBits *winBase = NULL, *win;
+     CARD32 winSize;
++    FbBits *actualFbLeft = NULL;
+ 
+     fbGetDrawable(&pShadow->drawable, shaBase, shaStride, shaBpp, shaXoff,
+                   shaYoff);
+@@ -89,6 +98,10 @@ shadowUpdatePacked(ScreenPtr pScreen, shadowBufPtr pBuf)
+                                                           pBuf->closure);
+                     if (!winBase)
+                         return;
++
++                    /* fbdev-dependent hack */
++                    actualFbLeft = (FbBits *)(((CARD8 *)winBase) - (scr * sizeof(FbBits)));
++
+                     scrBase = scr;
+                     winSize /= sizeof(FbBits);
+                     i = winSize;
+@@ -98,7 +111,36 @@ shadowUpdatePacked(ScreenPtr pScreen, shadowBufPtr pBuf)
+                     i = width;
+                 width -= i;
+                 scr += i;
+-                memcpy(win, sha, i * sizeof(FbBits));
++                /**
++                 * This is where the fun begins.
++                 *
++                 * Figure out what position the write starts at by taking the
++                 * difference between win and the actual far left of the framebuffer.
++                 * The framebuffer far left can be calculated as the difference
++                 * between the returned pointer and the offset given, in bytes.
++                 */
++                size_t firstWritePx = win - actualFbLeft;
++                size_t lastWritePx = firstWritePx + i;
++                if(lastWritePx > BORKED_START) {
++                    int cpy_len = i;
++                    size_t cpy_off = 0;
++                    if(firstWritePx <= BORKED_START) {
++                        cpy_len -= (actualFbLeft + BORKED_START) - win;
++                        memcpy(win, sha, (cpy_off = (i - cpy_len) * sizeof(FbBits)));
++                    }
++
++                    if(lastWritePx > PHYSICAL_DISPLAY_WIDTH - BORKED_WIDTH) {
++                        cpy_len -= lastWritePx - (PHYSICAL_DISPLAY_WIDTH - BORKED_WIDTH);
++                    }
++
++                    if(cpy_len > 0) {
++                        memcpy(MAX(actualFbLeft + BORKED_START, win) + BORKED_WIDTH,
++                               ((CARD8 *)sha) + cpy_off,
++                               cpy_len * sizeof(FbBits));
++                    }
++                } else {
++                    memcpy(win, sha, i * sizeof(FbBits));
++                }
+                 sha += i;
+             }
+             shaLine += shaStride;
+@@ -111,5 +153,6 @@ shadowUpdatePacked(ScreenPtr pScreen, shadowBufPtr pBuf)
+ shadowUpdateProc
+ shadowUpdatePackedWeak(void)
+ {
++    LogMessage(X_INFO, "Returning hacked draw-around shadowUpdateProc\n");
+     return shadowUpdatePacked;
+ }
